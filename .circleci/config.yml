@@ -74,4 +74,4 @@ workflows:
       - create-deployment:
           cluster-name: eks-capstone-deployment
           requires:
-            - eksctl
+            - create-cluster
