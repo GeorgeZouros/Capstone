@@ -1,0 +1,77 @@
+version: 2.1
+
+orbs:
+  aws-ecr: circleci/aws-ecr@7.2.0
+  aws-eks: circleci/aws-eks@1.1.0
+  kubernetes: circleci/kubernetes@0.12.0
+
+jobs:
+  lint:
+    docker:
+      - image: node:14
+
+    working_directory: /app
+
+    steps:
+      # Checkout
+      - checkout
+      # Restore cached dependencies
+      - restore_cache:
+          keys:
+            - v1-deps-{{ checksum "package-lock.json" }}
+              - v1-deps-
+
+      # Install dependencies
+      - run: npm install
+
+      # Cache dependencies
+      - save_cache:
+          key: v1-deps-{{ checksum "package-lock.json" }}
+          paths:
+            - node_modules
+
+      # Lint source code
+      - run: npm run lint
+
+  create-cluster:
+    executor: aws-eks/python3
+    steps:
+      - checkout
+      - run: |
+          curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+          sudo mv /tmp/eksctl /usr/local/bin
+          eksctl version
+      - aws-eks/create-cluster:
+          cluster-name: eks-capstone-deployment
+          aws-region: us-east-1
+          zones: us-east-1a,us-east-1b
+          show-eksctl-command: true
+
+  create-deployment:
+    executor: aws-eks/python3
+    parameters:
+      cluster-name:
+        description: |
+          Name of the EKS cluster
+        type: string
+    steps:
+      - checkout
+      - aws-eks/update-kubeconfig-with-authenticator:
+          cluster-name: << parameters.cluster-name >>
+          install-kubectl: true
+      - kubernetes/create-or-update-resource:
+          get-rollout-status: true
+          resource-file-path: "kubernetes.yaml"
+          resource-name: "deployment/capstone-deployment"
+
+workflows:
+  default:
+    jobs:
+      - lint
+      - create-cluster:
+          requires:
+            - lint
+      - create-deployment:
+          cluster-name: eks-capstone-deployment
+          requires:
+            - eksctl
